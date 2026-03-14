@@ -4,41 +4,42 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
-import base64
+import io
 
 # --- 設定 ---
-st.set_page_config(page_title="企業電話番号 検索ツール", layout="wide")
+st.set_page_config(page_title="企業電話番号 検索ツール (Excel対応)", layout="wide")
 
 st.title("📞 企業電話番号 自動検索ツール")
-st.write("CSVをアップロードすると、Google検索の結果から電話番号を自動で推測してリスト化します。")
+st.write("Excelファイルをアップロードすると、Google検索から電話番号を自動で抽出します。")
 
 # --- 関数: Google検索から電話番号を抽出 ---
 def search_phone_number(company_name, address):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
+    # 検索精度を上げるため、会社名と住所を組み合わせる
     query = f"{company_name} {address} 電話番号"
     url = f"https://www.google.com/search?q={query}"
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
-        
-        # ページ全体のテキストから電話番号のパターンを探す
         text = soup.get_text()
-        # 日本の電話番号パターン（携帯・固定・フリーダイヤル対応）
+        
+        # 日本の電話番号パターン
         phone_pattern = r'(\d{2,4}-\d{2,4}-\d{4})'
         match = re.search(phone_pattern, text)
         
         return match.group(1) if match else "見つかりませんでした"
     except Exception as e:
-        return f"エラー: {e}"
+        return f"エラー"
 
 # --- メインUI ---
-uploaded_file = st.file_uploader("会社名と住所が含まれるCSVファイルをアップロードしてください", type=['csv'])
+uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=['xlsx'])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    # Excelの読み込み
+    df = pd.read_excel(uploaded_file)
     st.write("### アップロードされたデータ (先頭5件)")
     st.dataframe(df.head())
     
@@ -53,14 +54,13 @@ if uploaded_file:
         total = len(df)
         
         for i, row in df.iterrows():
-            # 進捗更新
             status_text.text(f"検索中 ({i+1}/{total}): {row[col_name]}")
             
             # 検索実行
             phone = search_phone_number(row[col_name], row[col_addr])
             results.append(phone)
             
-            # Googleにブロックされないよう待機（重要）
+            # ブロック対策の待機
             time.sleep(2) 
             progress_bar.progress((i + 1) / total)
             
@@ -69,11 +69,14 @@ if uploaded_file:
         st.success("全ての検索が完了しました！")
         st.dataframe(df)
         
-        # ダウンロードボタン
-        csv = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        # Excelとしてダウンロードするための処理
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Sheet1')
+        
         st.download_button(
-            label="結果をCSVでダウンロード",
-            data=csv,
-            file_name="company_list_with_phone.csv",
-            mime="text/csv",
+            label="結果をExcelでダウンロード",
+            data=output.getvalue(),
+            file_name="search_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
